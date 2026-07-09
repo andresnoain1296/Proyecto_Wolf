@@ -1,9 +1,10 @@
 import datetime
 import pytz
 import requests
-from bs4 import BeautifulSoup
 
 LIMA_TZ = pytz.timezone('America/Lima')
+# 🔑 REEMPLAZA ESTO CON LA CLAVE QUE TE LLEGUE A TU CORREO
+API_KEY = "d06ef8db61b61e700b29b2a6d264aae0" 
 
 def obtener_hora_lima():
     return datetime.datetime.now(LIMA_TZ)
@@ -12,70 +13,88 @@ def obtener_datos_reales_casas():
     ahora_lima = obtener_hora_lima()
     partidos = []
 
-    # 1. La URL de la página que quieres raspar (Ejemplo)
-    url = "https://www.marca.com/futbol/primera-division/calendario.html" 
-    
-    # Los "headers" simulan que eres un navegador real (Chrome) para que no te bloqueen
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+    # Consultamos partidos de las principales ligas (ej. fútbol global/peruano si está disponible)
+    # The Odds API nos da cuotas de Bet365, Betano (en Latam), etc.
+    url = f"https://api.the-odds-api.com/v4/sports/soccer/odds/?apiKey={API_KEY}&regions=eu,us&markets=h2h&bookmakers=bet365,betano"
 
     try:
-        # 2. Descargar el HTML de la página
-        respuesta = requests.get(url, headers=headers, timeout=10)
+        respuesta = requests.get(url, timeout=10)
         
         if respuesta.status_code == 200:
-            # 3. Parsear el HTML con BeautifulSoup
-            soup = BeautifulSoup(respuesta.text, 'html.parser')
+            datos_api = respuesta.json()
             
-            # 4. BUSCAR LOS DATOS (Este es el núcleo del scraping)
-            # Aquí inspeccionas la web. Supongamos que cada fila de partido tiene la clase CSS 'partido-fila'
-            filas_partidos = soup.find_all('tr', class_='contenedor-partido') # <- Esto cambia según la web
-            
-            for i, fila in enumerate(filas_partidos):
-                # Ejemplo de cómo extraer el texto de las etiquetas internas
-                equipo_local = fila.find('span', class_='local').text.strip()
-                equipo_visitante = fila.find('span', class_='visitante').text.strip()
+            for i, juego in enumerate(datos_api):
+                # Convertir la hora del partido a la hora de Lima
+                hora_utc = datetime.datetime.strptime(juego["commence_time"], "%Y-%m-%dT%H:%M:%SZ")
+                hora_utc = pytz.utc.localize(hora_utc)
+                hora_partido_lima = hora_utc.astimezone(LIMA_TZ)
                 
-                # Armamos el diccionario real con lo clonado de la web
-                partido_info = {
+                # Clasificar si el partido es Hoy o Mañana
+                diferencia_dias = (hora_partido_lima.date() - ahora_lima.date()).days
+                
+                if diferencia_dias == 0:
+                    categoria = "hoy"
+                elif diferencia_dias == 1:
+                    categoria = "manana"
+                else:
+                    continue # Si es para más adelante, lo ignoramos por ahora
+                
+                # Extraer las cuotas de las casas disponibles
+                cuotas_estructuradas = {}
+                for bookmaker in juego.get("bookmakers", []):
+                    nombre_casa = bookmaker["title"] # Ej: "Bet365"
+                    
+                    # Buscar las cuotas de Local (1), Empate (X), Visita (2)
+                    home_odds, draw_odds, away_odds = 1.0, 1.0, 1.0
+                    market = bookmaker.get("markets", [{}])[0]
+                    
+                    for outcomes in market.get("outcomes", []):
+                        if outcomes["name"] == juego["home_team"]:
+                            home_odds = outcomes["price"]
+                        elif outcomes["name"] == juego["away_team"]:
+                            away_odds = outcomes["price"]
+                        else:
+                            draw_odds = outcomes["price"]
+                            
+                    cuotas_estructuradas[nombre_casa] = {
+                        "1": home_odds,
+                        "X": draw_odds,
+                        "2": away_odds
+                    }
+
+                # Si la casa no ofreció cuotas, le ponemos unas por defecto para que no falle tu diseño
+                if "Bet365" not in cuotas_estructuradas:
+                    cuotas_estructuradas["Bet365"] = {"1": 1.0, "X": 1.0, "2": 1.0}
+                if "Betano" not in cuotas_estructuradas:
+                    cuotas_estructuradas["Betano"] = {"1": 1.0, "X": 1.0, "2": 1.0}
+
+                partidos.append({
                     "id": str(i + 1),
-                    "categoria": "hoy",
-                    "local": equipo_local,
-                    "visitante": equipo_visitante,
+                    "categoria": categoria,
+                    "local": juego["home_team"],
+                    "visitante": juego["away_team"],
                     "marcador": "- / -",
                     "tiempo": "-",
-                    "hora_inicio": "18:00",
-                    "cuotas": {
-                        "Bet365": {"1": 1.90, "X": 3.40, "2": 4.10}, # Aquí meterías más lógica de scraping para cuotas
-                        "Betano": {"1": 1.95, "X": 3.30, "2": 4.00}
-                    }
-                }
-                partidos.append(partido_info)
+                    "hora_inicio": hora_partido_lima.strftime("%H:%M"),
+                    "cuotas": cuotas_structured_final(cuotas_estructuradas)
+                })
                 
-                # Para el ejemplo, solo traeremos los primeros 5 partidos
-                if len(partidos) >= 5:
-                    break
         else:
-            print(f"Error de conexión: Código {respuesta.status_code}")
+            print(f"Error API: {respuesta.status_code}")
             
     except Exception as e:
-        print(f"Ocurrió un error en el scraping: {e}")
-    
-    # Si el scraper falla o está vacío, devolvemos una lista vacía
-    # O puedes poner tus datos simulados aquí abajo como "respaldo" si falla
-    if not partidos:
-        return [
-            {
-                "id": "1",
-                "categoria": "en_vivo",
-                "local": "Sporting Cristal (Simulado)",
-                "visitante": "Universitario",
-                "marcador": "1 - 0",
-                "tiempo": "65'",
-                "hora_inicio": "En vivo",
-                "cuotas": {"Bet365": {"1": 1.85, "X": 3.40, "2": 4.20}}
-            }
-        ]
+        print(f"Error conexión API: {e}")
         
     return partidos
+
+def cuotas_structured_final(cuotas_existentes):
+    # Asegura que las 6 columnas de tu interfaz siempre se muestren aunque la API solo traiga algunas
+    todas_las_casas = ["Bet365", "Betano", "Betsson", "1xBet", "Inkabet", "Doradobet"]
+    resultado = {}
+    for casa in todas_las_casas:
+        if casa in cuotas_existentes:
+            resultado[casa] = cuotas_existentes[casa]
+        else:
+            # Si la API no tiene esa casa en ese instante, le pone 0.00 o una cuota base
+            resultado[casa] = {"1": 1.00, "X": 1.00, "2": 1.00}
+    return resultado
