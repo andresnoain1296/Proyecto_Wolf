@@ -7,12 +7,13 @@ st.set_page_config(page_title="Proyecto Wolf - Apuestas Deportivas", layout="wid
 st.title("🐺 Proyecto Wolf - Comparador en Tiempo Real (Lima, Perú)")
 st.caption("Filtro de cuotas optimizado para Bet365, Betano, Betsson, 1xBet, Inkabet y Doradobet.")
 
-# Botón para forzar la actualización de datos
+# 🛠️ CAMBIO 2: Botón corregido con st.rerun() para forzar la actualización
 if st.button("🔄 Actualizar Cuotas y Partidos"):
     st.cache_data.clear()
+    st.rerun()  # Esto recarga la página con los datos nuevos del scraper inmediatamente
 
-# Obtener los datos organizados del motor
-datos_partidos = wolf_engine.simular_datos_casas()
+# 🛠️ CAMBIO 1: Llamar a la función real del scraper en tu motor
+datos_partidos = wolf_engine.obtener_datos_reales_casas()
 
 # Crear las 3 pestañas solicitadas
 tab_en_vivo, tab_hoy, tab_manana = st.tabs([
@@ -46,7 +47,6 @@ with tab_en_vivo:
         st.info("No hay partidos jugándose en este momento.")
     for p in partidos_vivo:
         with st.container(border=True):
-            # Formato En Vivo: Nombre, Marcador y Tiempo
             st.subheader(f"🏟️ {p['local']} {p['marcador']} {p['visitante']}")
             st.markdown(f"⏱️ **Tiempo Transcurrido:** :red[{p['tiempo']}]")
             renderizar_tabla_cuotas(p["cuotas"])
@@ -58,7 +58,6 @@ with tab_hoy:
         st.info("No hay más partidos programados para hoy.")
     for p in partidos_hoy:
         with st.container(border=True):
-            # Formato Hoy: Nombre y Hora Local
             st.subheader(f"⚽ {p['local']} vs {p['visitante']}")
             st.markdown(f"🕒 **Hora de Lima:** {p['hora_inicio']}")
             renderizar_tabla_cuotas(p["cuotas"])
@@ -70,7 +69,6 @@ with tab_manana:
         st.info("No hay partidos registrados para mañana aún.")
     for p in partidos_manana:
         with st.container(border=True):
-            # Formato Mañana: Nombre y Hora Local
             st.subheader(f"📅 {p['local']} vs {p['visitante']}")
             st.markdown(f"🕒 **Hora de Lima:** {p['hora_inicio']}")
             renderizar_tabla_cuotas(p["cuotas"])
